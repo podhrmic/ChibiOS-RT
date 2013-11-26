@@ -114,16 +114,25 @@ static void icu_lld_serve_interrupt(ICUDriver *icup) {
   sr  = icup->tim->SR;
   sr &= icup->tim->DIER & STM32_TIM_DIER_IRQ_MASK;
   icup->tim->SR = ~sr;
-  if (icup->config->channel == ICU_CHANNEL_1) {
+  switch(icup->config->channel) {
+  case ICU_CHANNEL_1:
     if ((sr & STM32_TIM_SR_CC1IF) != 0)
-      _icu_isr_invoke_period_cb(icup);
+          _icu_isr_invoke_period_cb(icup);
     if ((sr & STM32_TIM_SR_CC2IF) != 0)
-      _icu_isr_invoke_width_cb(icup);
-  } else {
+          _icu_isr_invoke_width_cb(icup);
+    break;
+  case ICU_CHANNEL_2:
     if ((sr & STM32_TIM_SR_CC1IF) != 0)
-      _icu_isr_invoke_width_cb(icup);
+          _icu_isr_invoke_width_cb(icup);
     if ((sr & STM32_TIM_SR_CC2IF) != 0)
-      _icu_isr_invoke_period_cb(icup);
+          _icu_isr_invoke_period_cb(icup);
+    break;
+  case ICU_CHANNEL_3:
+    if ((sr & STM32_TIM_SR_CC3IF) != 0)
+          _icu_isr_invoke_width_cb(icup);
+    if ((sr & STM32_TIM_SR_CC4IF) != 0)
+          _icu_isr_invoke_period_cb(icup);
+    break;
   }
   if ((sr & STM32_TIM_SR_UIF) != 0)
     _icu_isr_invoke_overflow_cb(icup);
@@ -392,7 +401,8 @@ void icu_lld_start(ICUDriver *icup) {
   uint32_t psc;
 
   chDbgAssert((icup->config->channel == ICU_CHANNEL_1) ||
-              (icup->config->channel == ICU_CHANNEL_2),
+              (icup->config->channel == ICU_CHANNEL_2) ||
+              (icup->config->channel == ICU_CHANNEL_3),
               "icu_lld_start(), #1", "invalid input");
 
   if (icup->state == ICU_STOP) {
@@ -484,7 +494,8 @@ void icu_lld_start(ICUDriver *icup) {
   icup->tim->PSC  = (uint16_t)psc;
   icup->tim->ARR   = 0xFFFF;
 
-  if (icup->config->channel == ICU_CHANNEL_1) {
+  switch (icup->config->channel) {
+  case ICU_CHANNEL_1:
     /* Selected input 1.
        CCMR1_CC1S = 01 = CH1 Input on TI1.
        CCMR1_CC2S = 10 = CH2 Input on TI1.*/
@@ -508,7 +519,8 @@ void icu_lld_start(ICUDriver *icup) {
        data faster from within callbacks.*/
     icup->wccrp = &icup->tim->CCR[1];
     icup->pccrp = &icup->tim->CCR[0];
-  } else {
+    break;
+  case ICU_CHANNEL_2:
     /* Selected input 2.
        CCMR1_CC1S = 10 = CH1 Input on TI2.
        CCMR1_CC2S = 01 = CH2 Input on TI2.*/
@@ -532,6 +544,17 @@ void icu_lld_start(ICUDriver *icup) {
        data faster from within callbacks.*/
     icup->wccrp = &icup->tim->CCR[0];
     icup->pccrp = &icup->tim->CCR[1];
+    break;
+  case ICU_CHANNEL_3:
+    //selected input, mapped on TI1, no prescaler, no filter
+    icup->tim->CCMR2 = STM32_TIM_CCMR2_CC3S(1) | STM32_TIM_CCMR2_IC3F(0) | STM32_TIM_CCMR2_IC3PSC(0);
+    if (icup->config->mode == ICU_INPUT_ACTIVE_HIGH)
+      icup->tim->CCER = STM32_TIM_CCER_CC3E;
+    else
+      icup->tim->CCER = STM32_TIM_CCER_CC3E | STM32_TIM_CCER_CC3P;
+    icup->wccrp = &icup->tim->CCR[2];
+    //icup->pccrp = &icup->tim->CCR[3];
+    break;
   }
 }
 
@@ -607,16 +630,25 @@ void icu_lld_stop(ICUDriver *icup) {
 void icu_lld_enable(ICUDriver *icup) {
 
   icup->tim->SR = 0;                        /* Clear pending IRQs (if any). */
-  if (icup->config->channel == ICU_CHANNEL_1) {
+  switch(icup->config->channel) {
+  case ICU_CHANNEL_1:
     if (icup->config->period_cb != NULL)
       icup->tim->DIER |= STM32_TIM_DIER_CC1IE;
     if (icup->config->width_cb != NULL)
       icup->tim->DIER |= STM32_TIM_DIER_CC2IE;
-  } else {
+    break;
+  case ICU_CHANNEL_2:
     if (icup->config->width_cb != NULL)
       icup->tim->DIER |= STM32_TIM_DIER_CC1IE;
     if (icup->config->period_cb != NULL)
       icup->tim->DIER |= STM32_TIM_DIER_CC2IE;
+    break;
+  case ICU_CHANNEL_3:
+    if (icup->config->width_cb != NULL)
+      icup->tim->DIER |= STM32_TIM_DIER_CC3IE;
+    if (icup->config->period_cb != NULL)
+      icup->tim->DIER |= STM32_TIM_DIER_CC4IE;
+    break;
   }
   if (icup->config->overflow_cb != NULL)
     icup->tim->DIER |= STM32_TIM_DIER_UIE;
